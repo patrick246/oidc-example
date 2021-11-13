@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Auth Code Example</title>
+    <script>
+        const authServerConfig = {
+			issuer: "http://localhost:8080/auth/realms/test",
+            redirectUri: `${location.protocol}//${location.hostname}:${location.port}${location.pathname}`,
+            clientId: '01-auth-code',
+        }
+
+		function fetchDiscoveryDocument() {
+			return fetch(authServerConfig.issuer + "/.well-known/openid-configuration")
+              .then(resp => resp.json());
+        }
+
+        function doRedirect(discoveryDocument) {
+	        console.log('redirecting to IdP')
+	        const state = btoa([...crypto.getRandomValues(new Uint8Array(32))].map(c => String.fromCharCode(c)).join(''));
+			sessionStorage.setItem('oauth2State', state);
+	        location.href = discoveryDocument.authorization_endpoint + `?response_type=code&client_id=${encodeURIComponent(authServerConfig.clientId)}&redirect_uri=${encodeURIComponent(authServerConfig.redirectUri)}&state=${encodeURIComponent(state)}`
+        }
+
+        function exchangeCode(code, discoveryDocument) {
+			console.log('exchanging', code, 'at', discoveryDocument.token_endpoint);
+            return fetch(discoveryDocument.token_endpoint, {
+                method: 'POST',
+                headers: {
+					'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: `grant_type=authorization_code&redirect_uri=${encodeURIComponent(authServerConfig.redirectUri)}&client_id=${encodeURIComponent(authServerConfig.clientId)}&code=${encodeURIComponent(code)}`,
+            }).then(resp => resp.json())
+        }
+
+		fetchDiscoveryDocument().then(discoveryDocument => {
+			const queryParams = new URLSearchParams(location.search);
+			if (queryParams.has('code') && queryParams.has('state')) {
+				if (queryParams.get('state') !== sessionStorage.getItem('oauth2State')) {
+					console.error('state does not match', queryParams.get('state'), sessionStorage.getItem('oauth2State'));
+					return;
+                }
+                return exchangeCode(queryParams.get('code'), discoveryDocument).then(resp => {
+					console.log('auth code exchange response', resp);
+					sessionStorage.setItem('sessionToken', resp.access_token);
+					location.search = '';
+                })
+			} else if (sessionStorage.getItem('sessionToken') === null) {
+                doRedirect(discoveryDocument);
+				return;
+			}
+			console.log('got valid token!', sessionStorage.getItem('sessionToken'))
+        }).then(() => {
+			const token = sessionStorage.getItem('sessionToken');
+			const claims = atob(token.split('.')[1]);
+			document.getElementById('token').innerText = sessionStorage.getItem('sessionToken');
+			document.getElementById('claims').innerText = JSON.stringify(JSON.parse(claims), null, 2);
+        })
+    </script>
+</head>
+<body>
+<pre id="token"></pre>
+<pre id="claims"></pre>
+</body>
+</html>
